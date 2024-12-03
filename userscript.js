@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         GeoFS Taxiway Signs
-// @version      0.0.5
+// @version      0.0.1pre1
 // @description  Adds taxiway sign board things
 // @author       GGamerGGuy
 // @match        https://geo-fs.com/geofs.php*
@@ -54,7 +54,7 @@ const workerScript = () => {
             console.log(error);
         }
     }
-    async function getTwM(bounds) {
+    async function getTwM(bounds, twSAngle) {
         var theNodes;
         var theWays = {};
         getTwMData(bounds).then(twMD => {
@@ -91,7 +91,7 @@ const workerScript = () => {
                     let angle = calculateAngle(theNodes[theWays[w][n - 1]], theNodes[theWays[w][n]], theNodes[theWays[w][n + 1]]);
 
                     // Adjust threshold if needed
-                    if (angle > 1 && angle < 40) {
+                    if (angle > Number(twSAngle) && angle < 40) { //LocSt twSAngle
                         toFilter.push(n);
                     } else {
                         console.log(`Skipped node ${n} with angle: ${angle}`); // Debug: log skipped nodes
@@ -130,18 +130,30 @@ const workerScript = () => {
     }
     self.addEventListener('message', function(event) {
         if (event.data.type == 'getTwM') {
-            getTwM(event.data.data);
+            getTwM(event.data.data[0], event.data.data[1]);
         }
     });
 };
 (function() {
     'use strict';
+    if (localStorage.getItem("twSEnabled") == null) {
+        localStorage.setItem("twSEnabled", "true");
+    }
+    if (localStorage.getItem("twSAngle") == null) {
+        localStorage.setItem("twSAngle", "1");
+    }
+    if (localStorage.getItem("twSUpdateInterval") == null) {
+        localStorage.setItem("twSUpdateInterval", "4");
+    }
+    if (localStorage.getItem("twSRenderDist") == null) {
+        localStorage.setItem("twSRenderDist", "0.05");
+    }
     window.twM = [];
     window.theWays = [];
     window.theNodes = [];
     window.twSignWorker = new Worker(URL.createObjectURL(new Blob([`(${workerScript})()`], { type: 'application/javascript' })));
     window.twSignWorker.addEventListener('message', function(event) {
-        if (event.data.type == 'getTwM') {
+        if (event.data.type == 'getTwM' && (localStorage.getItem("twSEnabled") == "true")) {
             window.theWays = event.data.data.theWays;
             window.theNodes = event.data.data.theNodes;
             window.twSize = event.data.data.twSize / 3;
@@ -156,11 +168,141 @@ const workerScript = () => {
             });
         }
     });
-    setInterval(() => {window.updateMarkers();}, 4000);
+    setTimeout(() => {twSInit();}, 2000);
+    setInterval(() => {window.updateMarkers();}, 1000*Number(localStorage.getItem("twSUpdateInterval"))); //LocSt twSUpdateInterval
 })();
+function twSInit() { //Initializes the menu
+    /*<div id="gmenu" class="mdl-button mdl-js-button geofs-f-standard-ui" style="
+    padding: 0px;
+" onclick="window.ggamergguy.toggleMenu()"><img src="https://raw.githubusercontent.com/tylerbmusic/GPWS-files_geofs/refs/heads/main/s_icon.png" style=":;/: 0px;width: 30px;"></div>*/
+    if (!window.ggamergguy) {
+        window.ggamergguy = {};
+        var bottomDiv = document.getElementsByClassName('geofs-ui-bottom')[0];
+        window.ggamergguy.btn = document.createElement('div');
+
+        window.ggamergguy.btn.id = "gmenu";
+        window.ggamergguy.btn.classList = "mdl-button mdl-js-button geofs-f-standard-ui"
+
+        window.ggamergguy.btn.style.padding = "0px";
+
+        bottomDiv.appendChild(window.ggamergguy.btn);
+        window.ggamergguy.btn.innerHTML = `<img src="https://raw.githubusercontent.com/tylerbmusic/GPWS-files_geofs/refs/heads/main/s_icon.png" style="width: 30px">`;
+        document.getElementById("gmenu").onclick = function() {window.ggamergguy.toggleMenu();};
+    } //End if (!window.ggamergguy)
+    if (!window.ggamergguy.toggleMenu) {
+        window.ggamergguy.toggleMenu = function() {
+            if (window.ggamergguy.menuDiv.style.display == "none") {
+                window.ggamergguy.menuDiv.style.display = "block";
+                //set the values to the menu
+                for (let i in window.ggamergguy.tM) {
+                    window.ggamergguy.tM[i]();
+                }
+            } else {
+                window.ggamergguy.menuDiv.style.display = "none";
+            } //End if-else (window.ggamergguy.menuDiv.classList.length == 5)
+        };
+    } //End if (!window.ggamergguy.toggleMenu)
+    if (!window.ggamergguy.menuDiv) {
+        /*<div id="ggamergguy" class="geofs-list geofs-toggle-panel geofs-preference-list geofs-preferences" style="
+    z-index: 100;
+    position: fixed;
+    display: block;
+    width: 40%;
+"></div>*/
+        window.ggamergguy.menuDiv = document.createElement('div');
+
+        window.ggamergguy.menuDiv.id = "ggamergguyDiv";
+        window.ggamergguy.menuDiv.classList = "geofs-list geofs-toggle-panel geofs-preference-list geofs-preferences";
+
+        window.ggamergguy.menuDiv.style.zIndex = "100";
+        window.ggamergguy.menuDiv.style.position = "fixed";
+        window.ggamergguy.menuDiv.style.width = "40%";
+        window.ggamergguy.menuDiv.style.display = 'none';
+        document.body.appendChild(window.ggamergguy.menuDiv);
+    } //End if (!window.ggamergguy.menuDiv)
+    if (!window.ggamergguy.menuContents) {
+        window.ggamergguy.menuContents = `
+                <div id="twSigns">
+<h2>Taxiway Signs Settings</h2><span>Enabled: </span>
+<input id="twSEnabled" type="checkbox" onchange="localStorage.setItem('twSEnabled', this.checked)" style="
+    width: 5%;
+    height: 5%;
+"><br>
+<span>Render distance (degrees): </span>
+<input id="twSRenderDist" type="number" onchange="localStorage.setItem('twSRenderDist', this.value)"><br>
+<span>Update Interval (seconds): </span>
+<input id="twSUpdateInterval" type="number" onchange="localStorage.setItem('twSUpdateInterval', this.value)"><br>
+<span>Filter Angle (Filters taxiway points greater than the specified angle): </span>
+<input id="twSAngle" type="number" onchange="localStorage.setItem('twSAngle', this.value)"><br>
+<div style="
+    background: darkgray;
+    height: 2px;
+    margin: 10px;
+"></div>
+</div>
+            `;
+        function t() {
+            window.ggamergguy.menuDiv.innerHTML = window.ggamergguy.menuContents;
+            let a = document.getElementById("twSEnabled");
+            let b = document.getElementById("twSRenderDist");
+            let c = document.getElementById("twSUpdateInterval");
+            let d = document.getElementById("twSAngle");
+            a.checked = (localStorage.getItem("twSEnabled") == 'true');
+            b.value = Number(localStorage.getItem("twSRenderDist"));
+            c.value = Number(localStorage.getItem("twSUpdateInterval"));
+            d.value = Number(localStorage.getItem("twSAngle"));
+            if (localStorage.getItem("twSUpdateInterval") == null) {
+                t();
+            }
+        }
+        if (!window.ggamergguy.tM) {
+            window.ggamergguy.tM = [];
+        }
+        window.ggamergguy.tM.push(t);
+    } else { //End if, start else (!window.ggamergguy.menuContents)
+        window.ggamergguy.menuContents += `
+                <div id="twSigns">
+<h2>Taxiway Signs Settings</h2><span>Enabled: </span>
+<input id="twSEnabled" type="checkbox" onchange="localStorage.setItem('twSEnabled', this.checked)" style="
+    width: 5%;
+    height: 5%;
+"><br>
+<span>Render distance (degrees): </span>
+<input id="twSRenderDist" type="number" onchange="localStorage.setItem('twSRenderDist', this.value)"><br>
+<span>Update Interval (seconds): </span>
+<input id="twSUpdateInterval" type="number" onchange="localStorage.setItem('twSUpdateInterval', this.value)"><br>
+<span>Filter Angle (Filters taxiway points greater than the specified angle): </span>
+<input id="twSAngle" type="number" onchange="localStorage.setItem('twSAngle', this.value)"><br>
+<div style="
+    background: darkgray;
+    height: 2px;
+    margin: 10px;
+"></div>
+</div>
+            `;
+        function t() {
+            window.ggamergguy.menuDiv.innerHTML = window.ggamergguy.menuContents;
+            let a = document.getElementById("twSEnabled");
+            let b = document.getElementById("twSRenderDist");
+            let c = document.getElementById("twSUpdateInterval");
+            let d = document.getElementById("twSAngle");
+            a.checked = (localStorage.getItem("twSEnabled") == 'true');
+            b.value = Number(localStorage.getItem("twSRenderDist"));
+            c.value = Number(localStorage.getItem("twSUpdateInterval"));
+            d.value = Number(localStorage.getItem("twSAngle"));
+            if (localStorage.getItem("twSUpdateInterval") == null) {
+                t();
+            }
+        }
+        if (!window.ggamergguy.tM) {
+            window.ggamergguy.tM = [];
+        }
+        window.ggamergguy.tM.push(t);
+    } //End if-else (!window.ggamerguy.menuContents)
+} //End function twSInit()
 window.updateMarkers = async function() {
     if (window.geofs.cautiousWithTerrain == false) {
-        var renderDistance = 0.05; //Render distance, in degrees.
+        var renderDistance = Number(localStorage.getItem("twSRenderDist")); //Render distance, in degrees. //LocSt twSRenderDist
         var l0 = Math.floor(window.geofs.aircraft.instance.llaLocation[0]/renderDistance)*renderDistance;
         var l1 = Math.floor(window.geofs.aircraft.instance.llaLocation[1]/renderDistance)*renderDistance;
         var bounds = (l0) + ", " + (l1) + ", " + (l0+renderDistance) + ", " + (l1+renderDistance);
@@ -174,7 +316,7 @@ window.updateMarkers = async function() {
             window.theNodes = [];
             console.log("Markers removed, placing new ones");
             //Place new markers
-            window.twSignWorker.postMessage({type: "getTwM", data: bounds});
+            window.twSignWorker.postMessage({type: "getTwM", data: [bounds, localStorage.getItem("twSAngle")]});
         }
         window.MLastBounds = bounds;
     }
