@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         GeoFS Taxiway Signs
-// @version      0.2
+// @version      0.3
 // @description  Adds taxiway sign board things
 // @author       GGamerGGuy
 // @match        https://geo-fs.com/geofs.php*
@@ -34,16 +34,17 @@ const workerScript = () => {
     }
     //This function was partially written with AI.
     async function getTwMData(bounds) {
+        const bbox = bounds;
         const overpassUrl = 'https://overpass-api.de/api/interpreter';
-        const query = `[out:json];(
-            way["aeroway"="taxiway"]({{bbox}});
-            way["aeroway"="runway"]({{bbox}});
+        const query = `[out:json];
+        (
+            way["aeroway"="taxiway"]({{bbox}})[ref];
+            way["aeroway"="runway"]({{bbox}})[ref];
         );
         out body;
         >;
         out skel qt;
     `;
-        const bbox = bounds;
 
         try {
             const response = await fetch(`${overpassUrl}?data=${encodeURIComponent(query.replaceAll('{{bbox}}', bbox))}`);
@@ -137,8 +138,11 @@ const workerScript = () => {
 (function() {
     'use strict';
     window.twM = [];
+    window.twS = [];
     window.theWays = [];
     window.theNodes = [];
+    window.twSPos = [];
+    window.twSOri = [];
     window.twSignWorker = new Worker(URL.createObjectURL(new Blob([`(${workerScript})()`], { type: 'application/javascript' })));
     window.twSignWorker.addEventListener('message', function(event) {
         if (event.data.type == 'getTwM' && (localStorage.getItem("twSEnabled") == "true")) {
@@ -179,10 +183,14 @@ window.updateMarkers = async function() {
         var bounds = (l0) + ", " + (l1) + ", " + (l0+renderDistance) + ", " + (l1+renderDistance);
         if (!window.MLastBounds || (window.MLastBounds != bounds)) {
             //Remove existing markers
-            for (var i = 0; i < window.twM.length; i++) {
-                window.geofs.api.viewer.entities.remove(window.twM[i]);
+            for (let i = 0; i < window.twM.length; i++) {
+                window.geofs.api.viewer.scene.primitives.remove(window.twM[i]);
+            }
+            for (let i in window.twS) {
+                window.geofs.api.viewer.scene.primitives.remove(window.twS[i]);
             }
             window.twM = [];
+            window.twS = [];
             window.theWays = [];
             window.theNodes = [];
             console.log("Markers removed, placing new ones");
@@ -324,17 +332,8 @@ window.setTwM = async function(intersections) {
                 }*/
 
                 // Step 2: Place the main sign model without text
-                window.twM.push(
-                    window.geofs.api.viewer.entities.add({
-                        position: pos,
-                        orientation: ori,
-                        model: {
-                            uri: "https://raw.githubusercontent.com/tylerbmusic/GPWS-files_geofs/refs/heads/main/tw_sign.glb",
-                            minimumPixelSize: 32,
-                            maximumScale: 1
-                        }
-                    })
-                );
+                window.twSPos.push(pos);
+                window.twSOri.push(ori);
 
                 // Step 3: Define position, rotation, and scale adjustments for the plane
                 const translationMatrix = window.Cesium.Matrix4.fromTranslation(new window.Cesium.Cartesian3(0, 0.17, 0.8));
@@ -368,9 +367,27 @@ window.setTwM = async function(intersections) {
                 });
 
                 // Step 5: Add the primitive to the scene
-                window.geofs.api.viewer.scene.primitives.add(texturedPlane);
-                window.twM.push(texturedPlane);
+                window.twS.push(window.geofs.api.viewer.scene.primitives.add(texturedPlane));
             }
         }
     });
+    instanceTwS();
 };
+async function instanceTwS() {
+    const modelMatrices = window.twSPos.map((position, index) => {
+        const translationMatrix = /*window.Cesium.Transforms.northEastDownToFixedFrame*/window.Cesium.Matrix4.fromTranslation(position);
+
+        // Convert quaternion to rotation matrix
+        const rotationMatrix = window.Cesium.Matrix3.fromQuaternion(window.twSOri[index]);
+
+        // Apply rotation to translation
+        return window.Cesium.Matrix4.multiplyByMatrix3(translationMatrix, rotationMatrix, new window.Cesium.Matrix4());
+    });
+    window.twM.push(window.geofs.api.viewer.scene.primitives.add(
+        new window.Cesium.ModelInstanceCollection({
+            url: "https://raw.githubusercontent.com/tylerbmusic/GPWS-files_geofs/refs/heads/main/tw_sign.glb",
+            minimumPixelSize: 32,
+            maximumScale: 1,
+            instances: modelMatrices.map((matrix) => ({ modelMatrix: matrix })),
+        })));
+}
